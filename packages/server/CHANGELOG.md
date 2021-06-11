@@ -1,5 +1,14 @@
 # Changelog
 
+## \[0.3.0]
+
+- Add the ability to create https services
+  - [deab6be](https://github.com/thefrontside/simulacrum/commit/deab6beec9ff27b3b43874d711433b696adeeccb) add changeset on 2021-06-09
+- Add a `use` function to `createHttpApp` that adds express middleware that are operations.
+  - [0400220](https://github.com/thefrontside/simulacrum/commit/0400220c37c36ae0f523e927d2198dc5888ef6df) add middleware test on 2021-06-09
+- Add the ability to add scenario parameters and basic passive effects implementation.
+  - [a5bcb89](https://github.com/thefrontside/simulacrum/commit/a5bcb89ae54f05ce873ea9e2f2218cd3f33597bd) add changeset on 2021-05-28
+
 ## \[0.2.0]
 
 - require a single root simulator for each simulation
