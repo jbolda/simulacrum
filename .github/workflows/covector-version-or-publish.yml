@@ -3,16 +3,17 @@ name: version or publish
 on:
   push:
     branches:
-      - v0
+      - simulacrum-binary
 
 jobs:
-  version-or-publish:
+  version-or-release:
     runs-on: ubuntu-latest
     timeout-minutes: 65
     outputs:
-      change: ${{ steps.covector.outputs.change }}
-      commandRan: ${{ steps.covector.outputs.commandRan }}
-      successfulPublish: ${{ steps.covector.outputs.successfulPublish }}
+      willPublish: ${{ steps.covector.outputs.willPublish--simulacrum-server }}
+      version: ${{ steps.covector.outputs.version--simulacrum-server }}
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      release_id: ${{ steps.create_release.outputs.id }}
 
     steps:
       - uses: actions/checkout@v2
@@ -22,36 +23,138 @@ jobs:
         with:
           node-version: 14
           registry-url: "https://registry.npmjs.org"
-      - run: npm install --global npm@7.10.0
+      - run: npm install --global npm@7.17.0
       - run: npm install
+
+      # check the status and determine if we should run version or publish
+      - name: covector status
+        uses: jbolda/covector/packages/action@feat/github-release-existing
+        id: covector
+        with:
+          command: "status"
+      - name: dump covector output
+        env:
+          COVECTOR_CONTEXT: ${{ toJson(steps.covector) }}
+        run: echo "$COVECTOR_CONTEXT"
+
+      # ==== covector version ====
       - name: git config
+        if: ${{ steps.covector.outputs.status != 'No changes.' }}
         run: |
           git config --global user.name "${{ github.event.pusher.name }}"
           git config --global user.email "${{ github.event.pusher.email }}"
-      - name: covector version or publish (publish when no change files present)
-        uses: jbolda/covector/packages/action@covector-v0.5
-        id: covector
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: covector version
+        uses: jbolda/covector/packages/action@feat/github-release-existing
+        if: ${{ steps.covector.outputs.status != 'No changes.' }}
         with:
-          token: ${{ secrets.FRONTSIDEJACK_GITHUB_TOKEN }}
-          command: "version-or-publish"
-          createRelease: true
-
+          token: ${{ secrets.GITHUB_TOKEN }}
+          command: "version"
       # We need to run npm again so that `package-lock.json`
       # is updated if it needs to be before the PR is created
       # and submitted. We can remove this if this gets baked into
       # covector
       - run: npm install
-
+        if: ${{ steps.covector.outputs.status != 'No changes.' }}
       - name: Create Pull Request With Versions Bumped
         id: cpr
         uses: peter-evans/create-pull-request@v3
-        if: steps.covector.outputs.commandRan == 'version'
+        if: ${{ steps.covector.outputs.status != 'No changes.' }}
         with:
-          token: ${{ secrets.FRONTSIDEJACK_GITHUB_TOKEN }}
           title: "Publish New Versions"
           commit-message: "publish new versions"
           labels: "version updates"
           branch: "release"
           body: ${{ steps.covector.outputs.change }}
+
+      # ==== covector publish without binaries
+      - name: covector publish (no binaries)
+        uses: jbolda/covector/packages/action@feat/github-release-existing
+        if: ${{ steps.covector.outputs.willPublish--simulacrum-server != 'true' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          command: "publish"
+          createRelease: true
+
+      # ==== covector publish with binaries ====
+      - name: create release
+        if: steps.covector.outputs.willPublish--simulacrum-server
+        id: create_release
+        uses: softprops/action-gh-release@9729932bfb75c05ad1f6e3a729294e05abaa7001
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: "@simulacrum/server-v${{ steps.covector.outputs.version--simulacrum-server }}"
+          name: "@simulacrum/server v${{ steps.covector.outputs.version--simulacrum-server }}"
+          body: ""
+          draft: true
+
+  build-binaries:
+    needs: [version-or-release]
+    if: needs.version-or-release.outputs.willPublish
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            ext: ""
+          - os: macos-latest
+            platform: macos
+            ext: ""
+          - os: windows-latest
+            platform: windows
+            ext: .exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-node@v2
+        with:
+          node-version: "14.15.3"
+      - run: npm install --global npm@7.17.0
+      - run: npm install
+      - run: npm run build
+      # - name: install tooling needed for ubuntu build
+      #   if: ${{ matrix.platform == 'linux' }}
+      #   run: sudo apt-get install python g++ make
+      # - name: install tooling needed for windows build
+      #   if: ${{ matrix.platform == 'windows' }}
+      #   run: choco install nasm -y
+      - run: npm run build:binary -w @simulacrum/server
+      # - name: code sign binary on mac
+      #   if: ${{ matrix.platform == 'macos' }}
+      #   run: codesign --sign ./packages/server/dist/simulacrum-server${{matrix.ext}}
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.version-or-release.outputs.upload_url }}
+          asset_path: ./packages/server/dist/simulacrum-server${{matrix.ext}}
+          asset_name: simulacrum-server-${{matrix.platform}}${{matrix.ext}}
+          asset_content_type: application/octet-stream
+
+  publish:
+    needs: [build-binaries]
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0 # required for use of git history
+      - name: git config
+        run: |
+          git config --global user.name "${{ github.event.pusher.name }}"
+          git config --global user.email "${{ github.event.pusher.email }}"
+      - name: covector publish
+        uses: jbolda/covector/packages/action@feat/github-release-existing
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          command: "publish"
+          createRelease: true

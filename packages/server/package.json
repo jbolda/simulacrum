@@ -10,7 +10,8 @@
     "build": "npm run prepack",
     "lint": "eslint src test watch.ts",
     "start": "node dist/start.js",
-    "watch": "PORT=3000 NODE_ENV=development ts-node -P ./tsconfig.watch.json ./watch.ts"
+    "watch": "PORT=3000 NODE_ENV=development ts-node -P ./tsconfig.watch.json ./watch.ts",
+    "build:binary": "node ./binary/bundle-binary.js"
   },
   "repository": {
     "type": "git",
@@ -41,6 +42,7 @@
     "get-port": "^5.1.1",
     "graphql": "^15.5.0",
     "graphql-ws": "^4.2.3",
+    "nexe": "^4.0.0-beta.18",
     "nexus": "^1.0.0",
     "uuid": "^8.3.2",
     "ws": "^7.4.4"
